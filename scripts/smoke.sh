@@ -76,13 +76,14 @@ echo "providers:"
 ATT_TEXT="smoke attachment content"
 ATT_B64=$(printf '%s' "$ATT_TEXT" | base64)
 HTML='<p>Hello from the <strong>smoke test</strong></p>'
+PNG_B64='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='  # 1x1 PNG
 
 RES=$(post_json /emails "{\"from\":\"$FROM\",\"to\":[\"$TO\"],\"subject\":\"resend\",\"text\":\"hi\",\"html\":\"$HTML\"}")
 assert_contains "resend accepts" '"id"' "$RES"
 
 RES=$(curl -s -D "$TMP/sg-headers" -o /dev/null -w '%{http_code}' -X POST "$BASE/v3/mail/send" \
   -H 'Content-Type: application/json' \
-  -d "{\"personalizations\":[{\"to\":[{\"email\":\"$TO\"}]}],\"from\":{\"email\":\"$FROM\"},\"subject\":\"sendgrid\",\"content\":[{\"type\":\"text/plain\",\"value\":\"hi\"}]}")
+  -d "{\"personalizations\":[{\"to\":[{\"email\":\"$TO\"}]}],\"from\":{\"email\":\"$FROM\"},\"subject\":\"sendgrid\",\"content\":[{\"type\":\"text/plain\",\"value\":\"hi\"},{\"type\":\"text/html\",\"value\":\"<img src='cid:smoke-logo'>\"}],\"attachments\":[{\"content\":\"$PNG_B64\",\"filename\":\"logo.png\",\"type\":\"image/png\",\"disposition\":\"inline\",\"content_id\":\"smoke-logo\"}]}")
 [[ "$RES" == 202 ]] && grep -qi 'x-message-id' "$TMP/sg-headers" \
   && ok "sendgrid accepts (202 + X-Message-Id)" \
   || bad "sendgrid accepts" "status=$RES headers=$(cat "$TMP/sg-headers")"
@@ -139,6 +140,11 @@ LIST=$(curl -s "$BASE/api/messages")
 for src in resend sendgrid mailjet mailgun postmark brevo ses smtp; do
   assert_contains "source '$src' present" "\"source\":\"$src\"" "$LIST"
 done
+
+# SendGrid inline attachments (content_id) resolve to data: URIs, like SMTP cid: parts.
+SG_ID=$(echo "$LIST" | grep -o '{[^{}]*"source":"sendgrid"[^{}]*}' | grep -o '"id":"[^"]*"' | cut -d'"' -f4)
+SG=$(curl -s "$BASE/api/messages/$SG_ID")
+assert_contains "sendgrid inline cid: image resolves" 'data:image/png;base64,' "$SG"
 
 # Newest message is the SMTP one with an attachment: verify the round trip.
 ID=$(first_id)

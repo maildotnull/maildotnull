@@ -176,9 +176,10 @@ func (s *server) handleSendgrid(w http.ResponseWriter, r *http.Request) {
 			Value string `json:"value"`
 		} `json:"content"`
 		Attachments []struct {
-			Content  string `json:"content"`
-			Filename string `json:"filename"`
-			Type     string `json:"type"`
+			Content   string `json:"content"`
+			Filename  string `json:"filename"`
+			Type      string `json:"type"`
+			ContentID string `json:"content_id"`
 		} `json:"attachments"`
 		Headers map[string]string `json:"headers"`
 	}
@@ -223,6 +224,12 @@ func (s *server) handleSendgrid(w http.ResponseWriter, r *http.Request) {
 			Size:        len(content),
 			Content:     content,
 		})
+		// Resolve cid: references to data URIs, as ParseMIME does for SMTP;
+		// the sandboxed preview iframe can't fetch cid: parts itself.
+		if a.ContentID != "" && html != "" {
+			html = strings.ReplaceAll(html, "cid:"+a.ContentID,
+				"data:"+valueOr(a.Type, "application/octet-stream")+";base64,"+base64.StdEncoding.EncodeToString(content))
+		}
 	}
 	replyTo := ""
 	if body.ReplyTo != nil {
